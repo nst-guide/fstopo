@@ -193,7 +193,7 @@ def get_urls(blocks_dict):
         block_url += 'states-regions/quad-index.php?'
         block_url += f'blockID={degree_block_id}'
         r = requests.get(block_url)
-        soup = BeautifulSoup(r.content)
+        soup = BeautifulSoup(r.content, 'lxml')
         links = soup.select('#skipheader li a')
 
         # Not sure what happens if the blockID page doesn't exist on the FS
