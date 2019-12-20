@@ -1,16 +1,21 @@
 import re
+from math import ceil, floor
 from pathlib import Path
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from urllib.request import urlretrieve
 
 import click
 import geopandas as gpd
+import pint
 import requests
-from dateutil.parser import parse as date_parse
+from bs4 import BeautifulSoup
 from shapely.geometry import box
 
+from geom import buffer
 from grid import get_cells
+
+ureg = pint.UnitRegistry()
 
 
 @click.command()
@@ -61,7 +66,7 @@ from grid import get_cells
     default=False,
     help="Re-download and overwrite existing files.")
 def main(bbox, file, buffer_dist, buffer_unit, buffer_projection, overwrite):
-    """Download raw NAIP imagery for given geometry
+    """Download FSTopo quads for given geometry
     """
     if (bbox is None) and (file is None):
         raise ValueError('Either bbox or file must be provided')
@@ -69,50 +74,58 @@ def main(bbox, file, buffer_dist, buffer_unit, buffer_projection, overwrite):
     if (bbox is not None) and (file is not None):
         raise ValueError('Either bbox or file must be provided')
 
-    geometries = None
+    geometry = None
     if bbox:
         bbox = tuple(map(float, re.split(r'[, ]+', bbox)))
-        geometries = [box(*bbox)]
+        geometry = box(*bbox)
 
     if file:
         gdf = gpd.read_file(file).to_crs(epsg=4326)
 
         # Create buffer if arg is provided
         if buffer_dist is not None:
-            from geom import buffer
             gdf = buffer(
                 gdf,
                 distance=buffer_dist,
                 unit=buffer_unit,
                 epsg=buffer_projection)
 
-        geometries = list(get_cells(gdf.unary_union, cell_size=0.0625))
+        geometry = gdf.unary_union
 
-    if geometries is None:
-        raise ValueError('Error while computing geometries')
-
-    print('Downloading NAIP imagery for geometries:')
-    for geometry in geometries:
-        print(geometries[0].bounds)
+    if geometry is None:
+        raise ValueError('Error while computing geometry')
 
     download_dir = Path('data/raw')
     download_dir.mkdir(parents=True, exist_ok=True)
-    local_paths = download_naip(
-        geometries, directory=download_dir, overwrite=overwrite)
+    local_paths = download_fstopo(
+        geometry, directory=download_dir, overwrite=overwrite)
     with open('paths.txt', 'w') as f:
         f.writelines(_paths_to_str(local_paths))
 
 
-def download_naip(geometries, directory, overwrite):
-    """
+def download_fstopo(geometry, directory, overwrite):
+    """Download FSTopo quads
+
+    FSTopo is a 7.5-minute latitude/longitude grid system. Forest service files
+    are grouped into 5-digit _blocks_, which correspond to the degree of
+    latitude and longitude. For example, [block 46121][block_46121] contains all
+    files that are between latitude 46° and 47° and longitude -121° to longitude
+    -122°. Within that, each latitude and longitude degree is split into 7.5'
+    segments. This means that there are 8 cells horizontally and 8 cells
+    vertically, for up to 64 total quads within each lat/lon block. FSTopo map
+    quads are only created for National Forest areas, so not every lat/lon block
+    has 64 files.
+
+    [block_46121]: https://data.fs.usda.gov/geodata/rastergateway/states-regions/quad-index.php?blockID=46121
+
     Args:
-        - geometries (list): list of bounding boxes (as shapely objects)
+        - geometry: any shapely object; used to find intersection of FSTopo quads
         - directory (pathlib.Path): directory to download files to
         - overwrite (bool): whether to re-download and overwrite existing files
     """
-    urls = []
-    for geometry in geometries:
-        urls.extend(get_urls(geometry.bounds))
+    cells = list(get_cells(geometry, cell_size=0.125))
+    blocks_dict = create_blocks_dict(cells)
+    urls = get_urls(blocks_dict)
 
     local_paths = []
     counter = 1
@@ -128,89 +141,71 @@ def download_naip(geometries, directory, overwrite):
     return local_paths
 
 
-def get_urls(bbox):
+def create_blocks_dict(cells):
     """
+    The FS website directory goes by lat/lon boxes, so I need to get the
+    whole-degree boxes
+
+    FS uses the min for lat, max for lon, aka 46121 has quads with lat >= 46
+    and lon <= -121
+    """
+    blocks_dict = {}
+    for cell in cells:
+        miny, maxx = cell.bounds[1:3]
+        degree_y = str(floor(miny))
+        degree_x = str(abs(ceil(maxx)))
+
+        decimal_y = abs(miny) % 1
+        minute_y = str(
+            floor((decimal_y * ureg.degree).to(ureg.arcminute).magnitude))
+        # Left pad to two digits
+        minute_y = minute_y.zfill(2)
+
+        # Needs to be abs because otherwise the mod of a negative number is
+        # opposite of what I want.
+        decimal_x = abs(maxx) % 1
+        minute_x = str(
+            floor((decimal_x * ureg.degree).to(ureg.arcminute).magnitude))
+        # Left pad to two digits
+        minute_x = minute_x.zfill(2)
+
+        degree_block = degree_y + degree_x
+        minute_block = degree_y + minute_y + degree_x + minute_x
+
+        blocks_dict[degree_block] = blocks_dict.get(degree_block, [])
+        blocks_dict[degree_block].append(minute_block)
+
+    return blocks_dict
+
+
+def get_urls(blocks_dict):
+    """Find urls for FS Topo tif files given block locations
+
     Args:
-        - bbox (tuple): bounding box (west, south, east, north)
-        - high_res (bool): If True, downloads high-res 1/3 arc-second DEM
+        - blocks_dict: {header: [all_values]}, e.g. {'41123': ['413012322']}
+
+    Returns:
+        List[str]: urls to download
     """
-    url = 'https://viewer.nationalmap.gov/tnmaccess/api/products'
-    product = 'USDA National Agriculture Imagery Program (NAIP)'
-    extent = '3.75 x 3.75 minute'
-    fmt = 'JPEG2000'
+    all_tif_urls = []
+    for degree_block_id, minute_quad_ids in blocks_dict.items():
+        block_url = 'https://data.fs.usda.gov/geodata/rastergateway/'
+        block_url += 'states-regions/quad-index.php?'
+        block_url += f'blockID={degree_block_id}'
+        r = requests.get(block_url)
+        soup = BeautifulSoup(r.content)
+        links = soup.select('#skipheader li a')
 
-    params = {
-        'datasets': product,
-        'bbox': ','.join(map(str, bbox)),
-        'outputFormat': 'JSON',
-        'version': 1,
-        'prodExtents': extent,
-        'prodFormats': fmt}
+        # Not sure what happens if the blockID page doesn't exist on the FS
+        # website. Apparently internal server error from trying 99999
+        if links:
+            # Keep only quads that were found to be near trail
+            links = [link for link in links if link.text[:9] in minute_quad_ids]
+            urls = [urljoin(block_url, link.get('href')) for link in links]
+            tif_urls = [url for url in urls if url[-4:] == '.tif']
+            all_tif_urls.extend(tif_urls)
 
-    res = requests.get(url, params=params)
-    res = res.json()
-
-    # If I don't need to page for more results, return
-    if len(res['items']) == res['total']:
-        return select_results(res)
-
-    # Otherwise, need to page
-    all_results = [*res['items']]
-    n_retrieved = len(res['items'])
-    n_total = res['total']
-
-    for offset in range(n_retrieved, n_total, n_retrieved):
-        params['offset'] = offset
-        res = requests.get(url, params=params).json()
-        all_results.extend(res['items'])
-
-    # Keep all results with best fit index >0
-    return select_results(all_results)
-
-
-def select_results(results):
-    """Select relevant images from results
-
-    Selects most recent image for location, and results with positive fit index.
-    """
-    # Select results with positive bestFitIndex
-    results = [x for x in results['items'] if x['bestFitIndex'] > 0]
-
-    # counter_dict schema:
-    # counter_dict = {
-    #     bounds: {
-    #         'dateCreated': date,
-    #         'downloadURL'
-    #     }
-    # }
-    counter_dict = {}
-    for result in results:
-        bounds = result_to_bounds(result)
-
-        # does something already exist with these bounds?
-        existing = counter_dict.get(bounds)
-
-        # If exists, check if newer
-        if existing is not None:
-            existing_date = existing['dateCreated']
-            this_date = date_parse(result['dateCreated'])
-            if this_date < existing_date:
-                continue
-
-        # Doesn't exist yet or is newer, so add to dict
-        counter_dict[bounds] = {
-            'dateCreated': date_parse(result['dateCreated']),
-            'downloadURL': result['downloadURL']}
-
-    return [x['downloadURL'] for x in counter_dict.values()]
-
-
-def result_to_bounds(res_item):
-    minx = str(res_item['boundingBox']['minX'])
-    maxx = str(res_item['boundingBox']['maxX'])
-    miny = str(res_item['boundingBox']['minY'])
-    maxy = str(res_item['boundingBox']['maxY'])
-    return ','.join((minx, miny, maxx, maxy))
+    return all_tif_urls
 
 
 def download_url(url, directory, overwrite=False):

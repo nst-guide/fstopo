@@ -1,24 +1,13 @@
-# NAIP
+# FSTopo
 
-Generate high-resolution tiled imagery from USDA NAIP data
-
-## Overview
-
-I use [OpenMapTiles](https://github.com/openmaptiles/openmaptiles) to create
-self-hosted vector map tiles. However, that doesn't provide aerial imagery.
+Generate tiled map layer from US Forest Service Topo quads
 
 ### Source data
 
+The USFS publishes map quadrangles as
 The US Department of Agriculture (USDA) captures high-resolution aerial imagery
 for the continental US. The USGS's web portal allows for easy downloading of
 NAIP imagery.
-
-According to the [NAIP
-website](https://www.fsa.usda.gov/programs-and-services/aerial-photography/imagery-programs/naip-imagery/):
-
-> NAIP imagery is acquired at a one-meter ground sample distance (GSD) with a
-> horizontal accuracy that matches within six meters of photo-identifiable
-> ground control points, which are used during image inspection.
 
 
 ### Integration with `style.json`
@@ -27,16 +16,11 @@ The style JSON spec tells Mapbox GL how to style your map. Add the raster imager
 tiles as a source to overlay them with the other sources.
 
 Within `sources`, each object key defines the name by which the later parts of
-`style.json` should refer to the layer. Note the difference between a normal
-raster layer and the terrain RGB layer.
+`style.json` should refer to the layer.
 
 ```json
 "sources": {
-  "openmaptiles": {
-    "type": "vector",
-    "url": "https://api.maptiler.com/tiles/v3/tiles.json?key={key}"
-  },
-  "naip": {
+  "fstopo": {
     "type": "raster",
     "url": "https://example.com/url/to/tile.json",
   	"tileSize": 512
@@ -48,12 +32,12 @@ Where the `tile.json` for a raster layer should be something like:
 
 ```json
 {
-    "attribution": "<a href=\"https://www.usgs.gov/\" target=\"_blank\">© USGS</a>",
-    "description": "NAIP Imagery",
+    "attribution": "<a href=\"https://www.fs.fed.us/\" target=\"_blank\">© USFS</a>",
+    "description": "FSTopo quads",
     "format": "png",
-    "id": "naip",
-    "maxzoom": 15,
-    "minzoom": 11,
+    "id": "fstopo",
+    "maxzoom": 14,
+    "minzoom": 4,
     "name": "naip",
     "scheme": "tms",
     "tiles": ["https://example.com/url/to/tiles/{z}/{x}/{y}.png"],
@@ -66,9 +50,9 @@ raster layer between zooms 11 and 15 (inclusive), and sets the opacity to 0.2 at
 zoom 11 and 1 at zoom 15, with a gradual ramp in between.
 ```json
 {
-  "id": "naip",
+  "id": "fstopo",
   "type": "raster",
-  "source": "naip",
+  "source": "fstopo",
   "minzoom": 11,
   "maxzoom": 15,
   "paint": {
@@ -94,8 +78,8 @@ zoom 11 and 1 at zoom 15, with a gradual ramp in between.
 Clone the repository:
 
 ```
-git clone https://github.com/nst-guide/naip
-cd naip
+git clone https://github.com/nst-guide/fstopo
+cd fstopo
 ```
 
 This is written to work with Python >= 3.6. To install dependencies:
@@ -108,14 +92,12 @@ This also has dependencies on some C/C++ libraries. If you have issues
 installing with pip, try Conda:
 ```
 conda env create -f environment.yml
-source activate naip
+source activate fstopo
 ```
 
 ## Code Overview
 
 #### `download.py`
-
-Downloads USGS elevation data for a given bounding box.
 
 ```
 > python download.py --help
@@ -173,20 +155,38 @@ and optionally download my fork of `gdal2tiles` which allows for creating
 python download.py --file example.geojson
 
 # Create virtual raster:
-# The -b flags take each of the RGB bands at full opacity.
-# The -addalpha sets areas with no source raster as transparent.
-# See https://github.com/nst-guide/naip/issues/1
-gdalbuildvrt -b 1 -b 2 -b 3 -addalpha data/naip.vrt data/raw/*.jp2
+gdalbuildvrt -addalpha data/mosaic.vrt data/raw/*.tif
+
+# Use gdal_translate to take the single band with color table and expand it
+# into a 3-band VRT
+gdal_translate -of vrt -expand rgb data/mosaic.vrt data/rgb.vrt
+
+# Split the three rgb bands from rgb.vrt into separate files. This is
+# because I need to merge these rgb bands with the transparency band that's
+# the second band of mosaic.vrt from `gdalbuildvrt`, and I don't know how to
+# do that without separating bands into individual VRTs and then merging
+# them.
+gdal_translate -b 1 data/rgb.vrt data/r.vrt
+gdal_translate -b 2 data/rgb.vrt data/g.vrt
+gdal_translate -b 3 data/rgb.vrt data/b.vrt
+gdal_translate -b 2 data/mosaic.vrt data/a.vrt
+
+# Merge the four bands back together
+gdalbuildvrt -separate data/rgba.vrt data/r.vrt data/g.vrt data/b.vrt data/a.vrt
 
 # Download my fork of gdal2tiles.py
 # I use my own gdal2tiles.py fork for retina 2x 512x512 tiles
 git clone https://github.com/nst-guide/gdal2tiles
 cp gdal2tiles/gdal2tiles.py ./
 
-# Generate tiled imagery
-# --exclude excludes transparent tiles from output tileset
-# You may want to set max zoom level 15
-./gdal2tiles.py --processes 10 --exclude data/naip.vrt data/naip_tiles
+# Any raster cell where the fourth band is 0 should be transparent. I
+# couldn't figure out how to declare that all such data should be considered
+# nodata, but from inspection it looks like those areas have rgb values of
+# 54, 52, 52
+# This process is still better than just declaring 54, 52, 52 to be nodata
+# in a plain rgb file, in case there is any actual data in the map that's
+# defined as this rgb trio
+./gdal2tiles.py data/rgba.vrt --processes 16 --srcnodata="54,52,52,0" --exclude
 ```
 
 ### Compression

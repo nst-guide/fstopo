@@ -3,11 +3,22 @@ Helpers for dealing with regularly spaced grids
 
 NOTE: this is taken and simplified from nst-guide/create-database/grid.py:
 https://github.com/nst-guide/create-database/blob/master/code/grid.py
+There are multiple sizes of grids that are important.
+
+- 1 degree: USGS elevation files
+- .125 degree: USGS and USFS topo maps
+- .1 degree: Lightning count data (with .05 degree offset?)
+
+Lightning data has .1 degree _centerpoints_, so the grid lines are at
+40.05, 40.15, 40.25 etc.
 """
 from math import ceil, floor
 
 import numpy as np
+import pint
 from shapely.geometry import box
+
+ureg = pint.UnitRegistry()
 
 
 def get_cells(geom, cell_size, offset=0):
