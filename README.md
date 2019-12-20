@@ -186,7 +186,7 @@ cp gdal2tiles/gdal2tiles.py ./
 # This process is still better than just declaring 54, 52, 52 to be nodata
 # in a plain rgb file, in case there is any actual data in the map that's
 # defined as this rgb trio
-./gdal2tiles.py data/rgba.vrt --processes 16 --srcnodata="54,52,52,0" --exclude
+./gdal2tiles.py data/rgba.vrt data/fstopo_tiles --processes 16 --srcnodata="54,52,52,0" --exclude
 ```
 
 ### Compression
