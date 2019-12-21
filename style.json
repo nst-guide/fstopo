@@ -1,16 +1,16 @@
 {
   "version": 8,
-  "name": "NAIP",
+  "name": "FSTopo",
   "metadata": {
     "maputnik:renderer": "mbgljs"
   },
   "sources": {
-    "naip": {
+    "fstopo": {
       "minzoom": 4,
-      "maxzoom": 16,
+      "maxzoom": 15,
       "tileSize": 512,
       "tiles": [
-        "https://tiles.nst.guide/naip-png/{z}/{x}/{y}.png"
+        "https://tiles.nst.guide/fstopo-png/{z}/{x}/{y}.png"
       ],
       "type": "raster",
       "scheme": "tms"
@@ -20,9 +20,9 @@
   "glyphs": "https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf",
   "layers": [
     {
-      "id": "naip",
+      "id": "fstopo",
       "type": "raster",
-      "source": "naip",
+      "source": "fstopo",
       "minzoom": 4,
       "paint": {
         "raster-opacity": 1
@@ -32,5 +32,5 @@
       }
     }
   ],
-  "id": "contours"
+  "id": "FSTopo"
 }
