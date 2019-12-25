@@ -6,7 +6,7 @@
     "attribution": "<a href=\"https://www.fs.usda.gov/visit/maps\" target=\"_blank\">© USFS</a>",
     "scheme": "tms",
     "tiles": [
-        "https://tiles.nst.guide/contours/{z}/{x}/{y}.pbf"
+        "https://tiles.nst.guide/fstopo-png/{z}/{x}/{y}.png"
     ],
     "minzoom": 4,
     "maxzoom": 15
