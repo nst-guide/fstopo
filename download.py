@@ -3,7 +3,7 @@ from math import ceil, floor
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urljoin, urlparse
-from urllib.request import urlretrieve
+from urllib.request import urlretrieve as _urlretrieve
 
 import click
 import geopandas as gpd
@@ -11,6 +11,7 @@ import pint
 import requests
 from bs4 import BeautifulSoup
 from shapely.geometry import box
+from tqdm import tqdm
 
 from geom import buffer
 from grid import get_cells
@@ -225,6 +226,19 @@ def download_url(url, directory, overwrite=False):
 
 def _paths_to_str(paths):
     return [str(path) for path in paths]
+
+
+class DownloadProgressBar(tqdm):
+    def update_to(self, b=1, bsize=1, tsize=None):
+        if tsize is not None:
+            self.total = tsize
+        self.update(b * bsize - self.n)
+
+
+def urlretrieve(url, output_path):
+    with DownloadProgressBar(unit='B', unit_scale=True, miniters=1,
+                             desc=url.split('/')[-1]) as t:
+        _urlretrieve(url, filename=output_path, reporthook=t.update_to)
 
 
 if __name__ == '__main__':
