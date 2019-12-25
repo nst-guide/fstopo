@@ -1,0 +1,13 @@
+{
+    "tilejson": "2.2.0",
+    "name": "fstopo",
+    "description": "USFS Topographic Quadrangles",
+    "version": "0.1.0",
+    "attribution": "<a href=\"https://www.fs.usda.gov/visit/maps\" target=\"_blank\">© USFS</a>",
+    "scheme": "tms",
+    "tiles": [
+        "https://tiles.nst.guide/contours/{z}/{x}/{y}.pbf"
+    ],
+    "minzoom": 4,
+    "maxzoom": 15
+}
