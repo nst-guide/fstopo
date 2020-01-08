@@ -209,8 +209,12 @@ of png files.
 Note that these CLI commands worked on macOS, and some might need different
 syntax on Linux.
 
-Since the file sizes aren't as large as the NAIP imagery, I'll only do lossy PNG
-compression, and not make a WebP image set.
+#### WebP
+
+```bash
+cd data/fstopo_tiles
+for f in */*/*.png; do mkdir -p ../fstopo_tiles_webp/$(dirname $f); cwebp $f -q 80 -o ../fstopo_tiles_webp/$f ; done
+```
 
 #### Lossy PNG
 
@@ -226,29 +230,15 @@ displayed on any device. You can install with `brew install pngquant`.
 
 In order to create a directory of compressed images:
 ```bash
-cd data/fstopo_tiles
-find . -name '*.png' -print0 | xargs -0 -P8 -L1 pngquant --ext -comp.png --quality=70-80
+# Make copy of png files
+cp -r data/fstopo_tiles data/fstopo_tiles_png
+cd data/fstopo_tiles_png
+# Overwrite in place if it can be done without too much quality loss
+find . -name '*.png' -print0 | xargs -0 -P8 -L1 pngquant -f --ext .png --quality=70-80 --skip-if-larger
 ```
 
 Setting quality to `70-80` appears to create files that are about 25% of the
 original size.
-
-I couldn't figure out an easy way to write the output png files to a new
-directory. By default they're written in the same directory as the original
-file, with an added extension.
-
-```bash
-# in data/fstopo_tiles already
-mkdir ../fstopo_tiles_png
-# First move all tiles with extension -comp.png to the new directory
-# Take out --remove-source-files if you want to copy, not move the files
-# I use rsync because I couldn't figure out an easy way with `mv` to move while
-# keeping the directory structure.
-rsync -a --remove-source-files --include "*/" --include="*-comp.png" --exclude="*" . ../fstopo_tiles_png/
-# Then rename all of the files, taking off the -comp suffix
-cd ../fstopo_tiles_png
-find . -type f -name "*-comp.png" -exec rename -s '-comp.png' '.png' {} +
-```
 
 When run on Halfmile's PCT track data with a 2 mile buffer (including
 alternates), the resulting data after pngquant compression has file sizes:
