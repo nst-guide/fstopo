@@ -1,8 +1,10 @@
 click
-dateutil
+python-dateutil
 geopandas
 numpy
 pint
 requests
 shapely
 tqdm
+beautifulsoup4
+lxml

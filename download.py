@@ -196,14 +196,14 @@ def get_urls(blocks_dict):
         r = requests.get(block_url)
         soup = BeautifulSoup(r.content, 'lxml')
         links = soup.select('#skipheader li a')
-
+        
         # Not sure what happens if the blockID page doesn't exist on the FS
         # website. Apparently internal server error from trying 99999
         if links:
             # Keep only quads that were found to be near trail
-            links = [link for link in links if link.text[:9] in minute_quad_ids]
+            links = [link for link in links if re.sub(".*_([0-9]{9})_FSTopo.tif*", r"\1", link.text) in minute_quad_ids]
             urls = [urljoin(block_url, link.get('href')) for link in links]
-            tif_urls = [url for url in urls if url[-4:] == '.tif']
+            tif_urls = [url for url in urls if url[-5:] == '.tiff']
             all_tif_urls.extend(tif_urls)
 
     return all_tif_urls
